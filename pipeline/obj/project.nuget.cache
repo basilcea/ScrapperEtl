@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "SbdW8nIfQPVyWcTnmojJ3FWQQoEdMPvrXXqynttdGmGMOw15ziPHpekG/F/HMjq5LpGds5YvMS1+73quQClQww==",
+  "success": true,
+  "projectFilePath": "/Users/mrcea/Desktop/Interviews/netEtl/pipeline/pipeline.csproj",
+  "expectedPackageFiles": [
+    "/Users/mrcea/.nuget/packages/htmlagilitypack/1.11.42/htmlagilitypack.1.11.42.nupkg.sha512",
+    "/Users/mrcea/.nuget/packages/system.linq.async/6.0.1/system.linq.async.6.0.1.nupkg.sha512"
+  ],
+  "logs": []
+}
