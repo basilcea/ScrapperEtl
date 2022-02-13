@@ -18,7 +18,7 @@ namespace Pipeline
             try
             {
                 logger.LogInformation($"Extracting Data");
-                new Parser(Configuration.GetSection("Scrapper"), logger).Extract("//ul[@class=\"nav nav-list\"]/li[1]/ul/li").Wait();
+                new Parser(Configuration.GetSection("Scrapper"), logger).ETL("//ul[@class=\"nav nav-list\"]/li[1]/ul/li").Wait();
                 logger.LogInformation($"Extraction completed");
             }
             catch (Exception ex)

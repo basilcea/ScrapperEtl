@@ -6,6 +6,8 @@ using System.Linq;
 using System;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.IO;
+using System.Text.Json;
 
 namespace Pipeline
 {
@@ -21,55 +23,105 @@ namespace Pipeline
             _htmlDoc = GetDocument($"{_settings.Url}/index.html", _settings.Username, _settings.Password);
         }
 
-
-
-
-
-        public Task<List<Book>> Extract(string xPath)
+        public async Task ETL(string xPath)
         {
-            var books = new List<Book>();
 
             var genreList = _htmlDoc.DocumentNode.SelectNodes(xPath);
-            Parallel.ForEach(genreList, async genre =>
-            {   
+            var categoryBooks = new List<BooksByCategory>();
+            var categoriesCount = 0;
+            var bookCount = 0;
+
+            Parallel.ForEach(genreList, genre =>
+            {
+                categoriesCount++;
                 var node = genre.SelectSingleNode("a");
                 var genreUrl = GetUri(_settings.Url, node, "href");
                 _logger.LogInformation("url:{@logger}", genreUrl);
-                var booksByGenre = await ExtractByGenre(genreUrl, genre.InnerText);
-                await foreach (Book book in booksByGenre) books.Add(book);
+                var booksByGenre = ExtractTransformByGenre(genreUrl, genre.InnerText.Trim(), categoryBooks);
+
             });
-            return Task.FromResult(books);
+            bookCount = categoryBooks.AsEnumerable().Sum(x => bookCount + x.NumberOfBooks);
+            var books = new Summary
+            {
+                NumberOfCategories = categoriesCount,
+                NumberOfBooks = bookCount,
+                CategoryDetails = categoryBooks,
+                DateCreated = DateTime.Now
+
+            };
+            var BookList = File.Create(@"result.json");
+            await JsonSerializer.SerializeAsync(BookList, books);
         }
 
-        private Task<IAsyncEnumerable<Book>> ExtractByGenre(string url, string genre)
+        private Task<IAsyncEnumerable<BooksByCategory>> ExtractTransformByGenre(string url, string genre, List<BooksByCategory> categoryBooks)
         {
             var books = new List<Book>();
             var htmlDoc = GetDocument(url);
-            var booksList = htmlDoc.DocumentNode.SelectNodes("//article[@class=\"product_pod\"]");
-            foreach(var book in booksList)
+            var bookCount = 0;
+            var paging = htmlDoc.DocumentNode.SelectSingleNode("//ul[@class=\"pager\"]");
+            _logger.LogInformation("Transforming data");
+            if (paging is not null)
             {
-                
+                var htmlNodeCollectionPerPage = new List<HtmlNodeCollection>();
+                var pages = int.Parse((paging.SelectSingleNode("//li[@class=\"current\"]").InnerText.Trim().Split(" "))[3]);
+                for(int i = 0; i < pages; i++){
+                    htmlNodeCollectionPerPage.Add(
+                        GetDocument(url.Replace("index.html", $"page-{i+1}.html"))
+                        .DocumentNode.SelectNodes("//article[@class=\"product_pod\"]"));
+                }
+                 Parallel.ForEach(htmlNodeCollectionPerPage, htmlNodePerPage =>
+                {
+                    var (count, booksPerPage) =  RunParallel(htmlNodePerPage, books, bookCount, _settings.Url, genre);
+                     bookCount += count;
+                     books = booksPerPage;
+                });
+            }
+            else
+            {
+                var bookList = htmlDoc.DocumentNode.SelectNodes("//article[@class=\"product_pod\"]");
+                var (count , _) = RunParallel(bookList, books, bookCount, _settings.Url, genre);
+                bookCount += count;
+            }
+            categoryBooks.Add(new BooksByCategory
+            {
+                Category = genre,
+                NumberOfBooks = bookCount,
+                Books = books
+            });
+
+            return Task.FromResult(categoryBooks.ToAsyncEnumerable());
+        }
+        private (int, List<Book>) RunParallel(HtmlNodeCollection BookCollectionNode,
+        List<Book> books, int count, string url,
+        string genre)
+
+        {
+            var node = 0;
+            Parallel.ForEach(BookCollectionNode, book =>
+            {
+                count++;
                 var newBook = new Book
                 {
-                    PageLink = GetUri(_settings.Url,
-                    book.SelectSingleNode("//h3/a"), "href"),
-                    ImageLink = GetUri(_settings.Url,
-                    book.SelectSingleNode("//div[@class=\"image_container\"]/a/img"),
-                     "src"),
+                    PageLink = GetUri(url,
+                    book.SelectNodes("//h3/a")[node], "href"),
+                    ImageLink = GetUri(url,
+                    book.SelectNodes("//div[@class=\"image_container\"]/a/img")[node],
+                    "src"),
                     Genre = genre,
-                    BookName = book.SelectSingleNode("//h3/a").InnerText,
+                    BookName = book.SelectNodes("//h3/a")[node].InnerText,
                     Amount = Convert.ToDecimal(
-                        (book.SelectSingleNode("//p[@class=\"price_color\"]")
+                        (book.SelectNodes("//p[@class=\"price_color\"]")[node]
                         .InnerText.Split("£"))[1]),
-                    Rating = GetRating(book.SelectSingleNode("//p[contains(@class, \"star-rating\")]")),
-                    InStock = CheckInstock(book.SelectSingleNode("//p[@class=\"instock availability\"]"))
+                    Rating = GetRating(book.SelectNodes("//p[contains(@class, \"star-rating\")]")[node]),
+                    InStock = CheckInstock(book.SelectNodes("//p[@class=\"instock availability\"]")[node]),
 
                 };
-                _logger.LogInformation("Book Added : {@book}", newBook.Genre);
+                _logger.LogInformation("Book Added : {@book}", newBook);
                 books.Add(newBook);
+                node++;
 
-            };
-            return Task.FromResult(books.ToAsyncEnumerable());
+            });
+            return (count, books);
         }
         private static string GetUri(string baseUrl, HtmlNode relativePath, string attribute = "")
         {
@@ -88,10 +140,11 @@ namespace Pipeline
             var nodeValue = node.Attributes["class"].Value.Split(" ")[1];
             return dict[nodeValue];
         }
-
         private static bool CheckInstock(HtmlNode node)
         {
-            return node.InnerText == " In stock ";
+            return node.InnerText.Trim() == "In stock";
         }
+
+
     }
 }
