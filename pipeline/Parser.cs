@@ -85,7 +85,6 @@ namespace Pipeline
         List<Book> books, string url,
         string genre)
         {
-        // Console.WriteLine($"{genre}, {bookCollectionNode.Count()}");
         var node = 0;
          foreach(var book in bookCollectionNode)
             {   
